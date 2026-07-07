@@ -1,0 +1,320 @@
+# KNOWN_VULNS — ground-truth vulnerability catalog
+# Purpose: answer key for benchmarking Scantonomous scan findings against this app.
+# Diff scanner output vs. this file: a hit on a `vulnerable_source` path == true positive;
+# a hit on a `secure_source` path == false positive.
+#
+# Schema per entry:
+#   id               stable slug for this vuln class
+#   category         human-readable vulnerability class
+#   cwe              primary CWE id(s)
+#   owasp            OWASP category (Cloud/Top-10 where sensible)
+#   scenario         exact CloudGoat scenario name
+#   vulnerable_source source paths that ARE vulnerable (SAST/IaC true-positive targets)
+#   notes            context / attack path caveats
+
+app: CloudGoat
+full_name: Rhino Security Labs CloudGoat — "Vulnerable by Design" AWS/Azure deployment tool
+upstream: https://github.com/RhinoSecurityLabs/cloudgoat
+fork: https://github.com/tomj12k/cloudgoat
+language: HCL/Terraform
+scan_surface: [IaC-terraform]
+catalog_notes: >
+  Each scenario lives under cloudgoat/scenarios/{aws,azure}/<name>/ and provisions an
+  intentionally-misconfigured cloud environment via Terraform (the `terraform/`
+  subdirectory). The misconfiguration is IaC-resident (over-permissive IAM policies,
+  public S3, exposed IMDS, hardcoded secrets, insecure network peering, etc.), so the
+  primary scan surface is the Terraform HCL. Scenario intent/attack path is described in
+  each scenario's README.md and cheat_sheet*.md. Paths below are relative to repo root.
+  EXCLUDED (not real vulnerable scenarios): cloudgoat/scenarios/aws/scenario_template
+  (empty scaffold), cloudgoat/scenarios/aws/static (shared support assets),
+  cloudgoat/scenarios/azure/azure_test (author-labeled "POC, not an actual scenario").
+
+vulns:
+  - id: cg-agentcore-identity-confusion
+    category: IAM privilege escalation / confused-deputy identity confusion
+    cwe: [CWE-269, CWE-441]
+    owasp: A01:2021-Broken Access Control
+    scenario: agentcore_identity_confusion
+    vulnerable_source: [cloudgoat/scenarios/aws/agentcore_identity_confusion/terraform/]
+    notes: >
+      IAM user Sandy pivots through Bedrock AgentCore role/identity confusion to reach
+      an Agent Runtime's sensitive S3 data source it should not be able to spin up directly.
+
+  - id: cg-beanstalk-secrets
+    category: Excessive IAM permissions / secret exposure via Elastic Beanstalk
+    cwe: [CWE-269, CWE-522]
+    owasp: A01:2021-Broken Access Control
+    scenario: beanstalk_secrets
+    vulnerable_source: [cloudgoat/scenarios/aws/beanstalk_secrets/terraform/]
+    notes: >
+      Low-privileged user escalates to admin by extracting secrets exposed through an
+      Elastic Beanstalk environment, ultimately reading a Secrets Manager secret.
+
+  - id: cg-bedrock-agent-hijacking
+    category: Prompt/agent hijacking → over-permissive execution role
+    cwe: [CWE-269, CWE-284]
+    owasp: A01:2021-Broken Access Control
+    scenario: bedrock_agent_hijacking
+    vulnerable_source: [cloudgoat/scenarios/aws/bedrock_agent_hijacking/terraform/]
+    notes: >
+      IAM user Grace hijacks a Bedrock Agent (Lambda action-group + execution role) to
+      abuse the agent's excessive S3 permissions and retrieve the flag from S3.
+
+  - id: cg-cloud-breach-s3
+    category: SSRF via misconfigured reverse proxy → IMDS credential theft → public/exposed S3
+    cwe: [CWE-918, CWE-284]
+    owasp: A05:2021-Security Misconfiguration
+    scenario: cloud_breach_s3
+    vulnerable_source: [cloudgoat/scenarios/aws/cloud_breach_s3/terraform/]
+    notes: >
+      Anonymous outsider abuses a misconfigured reverse proxy on EC2 to query the instance
+      metadata service (IMDS), steals instance-profile keys, and exfiltrates data from S3.
+
+  - id: cg-codebuild-secrets
+    category: Secrets in CI/CD (CodeBuild) / excessive IAM permissions
+    cwe: [CWE-798, CWE-522, CWE-269]
+    owasp: A05:2021-Security Misconfiguration
+    scenario: codebuild_secrets
+    vulnerable_source: [cloudgoat/scenarios/aws/codebuild_secrets/terraform/]
+    notes: >
+      Users Solo/Calrissian recover secrets from a CodeBuild project and SSM parameters,
+      pivot through Lambda/EC2, and reach secret strings in a secured RDS database.
+
+  - id: cg-data-secrets
+    category: Hardcoded/stored secrets exposure via Lambda + Secrets Manager
+    cwe: [CWE-798, CWE-522]
+    owasp: A05:2021-Security Misconfiguration
+    scenario: data_secrets
+    vulnerable_source: [cloudgoat/scenarios/aws/data_secrets/terraform/]
+    notes: >
+      Starting IAM user leverages an EC2 role / Lambda to reach a Secrets Manager secret.
+
+  - id: cg-detection-evasion
+    category: Insufficient logging & monitoring / detection evasion
+    cwe: [CWE-778, CWE-693]
+    owasp: A09:2021-Security Logging and Monitoring Failures
+    scenario: detection_evasion
+    vulnerable_source: [cloudgoat/scenarios/aws/detection_evasion/terraform/]
+    notes: >
+      Attacker must reach SecretsManager secrets across EC2 instances without tripping the
+      CloudTrail/CloudWatch/SNS/GuardDuty detection suite — tests logging/alerting gaps.
+
+  - id: cg-ec2-ssrf
+    category: SSRF → EC2 IMDS credential theft → privilege escalation
+    cwe: [CWE-918]
+    owasp: A05:2021-Security Misconfiguration
+    scenario: ec2_ssrf
+    vulnerable_source: [cloudgoat/scenarios/aws/ec2_ssrf/terraform/]
+    notes: >
+      IAM user Solus exploits SSRF against EC2 IMDS to steal the instance profile's keys,
+      then uses them to invoke the target cg-lambda function.
+
+  - id: cg-ecs-efs-attack
+    category: EFS/ECS misconfiguration → unauthorized filesystem mount
+    cwe: [CWE-284, CWE-269]
+    owasp: A01:2021-Broken Access Control
+    scenario: ecs_efs_attack
+    vulnerable_source: [cloudgoat/scenarios/aws/ecs_efs_attack/terraform/]
+    notes: >
+      From SSH access on the Ruse_Box EC2, pivot through ECS to mount a misconfigured EFS
+      volume (over-permissive mount targets/security groups) and read the flag.
+
+  - id: cg-ecs-privesc-evade-protection
+    category: ECS privilege escalation + detection evasion
+    cwe: [CWE-269, CWE-778]
+    owasp: A01:2021-Broken Access Control
+    scenario: ecs_privesc_evade_protection
+    vulnerable_source: [cloudgoat/scenarios/aws/ecs_privesc_evade_protection/terraform/]
+    notes: >
+      Escalate through an ECS task/EC2 to read flag.txt in S3 while avoiding GuardDuty,
+      CloudTrail, EventBridge and Lambda-driven defenses.
+
+  - id: cg-ecs-takeover
+    category: Container/ECS takeover via exposed web service → IAM abuse
+    cwe: [CWE-284, CWE-269]
+    owasp: A01:2021-Broken Access Control
+    scenario: ecs_takeover
+    vulnerable_source: [cloudgoat/scenarios/aws/ecs_takeover/terraform/]
+    notes: >
+      Reach an external website on an EC2 public IP, pivot across ECS services/containers
+      to compromise the "vault" container and retrieve the flag.
+
+  - id: cg-federated-console-takeover
+    category: IAM privilege escalation → federated console session hijack
+    cwe: [CWE-269, CWE-266]
+    owasp: A01:2021-Broken Access Control
+    scenario: federated_console_takeover
+    vulnerable_source: [cloudgoat/scenarios/aws/federated_console_takeover/terraform/]
+    notes: >
+      Low-privileged IAM user pivots (via IMDSv2-enabled EC2 and an elevated role) into a
+      federated AWS Management Console session with elevated permissions.
+
+  - id: cg-glue-privesc
+    category: AWS Glue service privilege escalation → SSM secret disclosure
+    cwe: [CWE-269, CWE-522]
+    owasp: A01:2021-Broken Access Control
+    scenario: glue_privesc
+    vulnerable_source: [cloudgoat/scenarios/aws/glue_privesc/terraform/]
+    notes: >
+      Two IAM users abuse a Glue service role (with RDS/EC2/S3 reach) to escalate and read
+      a secret string from the SSM parameter store.
+
+  - id: cg-iam-enum-basics
+    category: IAM information disclosure via over-permissive read/enumeration policies
+    cwe: [CWE-284, CWE-668]
+    owasp: A01:2021-Broken Access Control
+    scenario: iam_enum_basics
+    vulnerable_source: [cloudgoat/scenarios/aws/iam_enum_basics/terraform/]
+    notes: >
+      Low-level user Bob enumerates managed/inline policies, group memberships and
+      assumable roles to uncover five flags hidden in IAM resource metadata.
+
+  - id: cg-iam-privesc-by-attachment
+    category: IAM privilege escalation via instance-profile attachment
+    cwe: [CWE-269, CWE-266]
+    owasp: A01:2021-Broken Access Control
+    scenario: iam_privesc_by_attachment
+    vulnerable_source: [cloudgoat/scenarios/aws/iam_privesc_by_attachment/terraform/]
+    notes: >
+      Attacker leverages iam:PassRole + ec2 instance-profile-attachment permissions to
+      launch an EC2 with a far more privileged role, gaining admin.
+
+  - id: cg-iam-privesc-by-ec2
+    category: IAM privilege escalation via EC2 role assumption
+    cwe: [CWE-269, CWE-266]
+    owasp: A01:2021-Broken Access Control
+    scenario: iam_privesc_by_ec2
+    vulnerable_source: [cloudgoat/scenarios/aws/iam_privesc_by_ec2/terraform/]
+    notes: >
+      cg_dev_user uses ReadOnly enumeration to find and compromise the admin_ec2 instance
+      role and gain administrator permissions.
+
+  - id: cg-iam-privesc-by-key-rotation
+    category: IAM privilege escalation via credential/key rotation abuse
+    cwe: [CWE-269, CWE-266]
+    owasp: A01:2021-Broken Access Control
+    scenario: iam_privesc_by_key_rotation
+    vulnerable_source: [cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/terraform/]
+    notes: >
+      Starting role that manages other users' credentials abuses key-rotation permissions
+      to seize the admin role and read the Secrets Manager flag.
+
+  - id: cg-iam-privesc-by-rollback
+    category: IAM privilege escalation via policy version rollback
+    cwe: [CWE-269, CWE-266]
+    owasp: A01:2021-Broken Access Control
+    scenario: iam_privesc_by_rollback
+    vulnerable_source: [cloudgoat/scenarios/aws/iam_privesc_by_rollback/terraform/]
+    notes: >
+      Highly-limited IAM user with SetDefaultPolicyVersion restores a prior policy version
+      granting full admin — classic iam:SetDefaultPolicyVersion privesc.
+
+  - id: cg-lambda-privesc
+    category: IAM privilege escalation via Lambda + PassRole
+    cwe: [CWE-269, CWE-266]
+    owasp: A01:2021-Broken Access Control
+    scenario: lambda_privesc
+    vulnerable_source: [cloudgoat/scenarios/aws/lambda_privesc/terraform/]
+    notes: >
+      IAM user Chris assumes a role with full Lambda access + iam:PassRole and escalates to
+      full admin by invoking a Lambda under a privileged execution role.
+
+  - id: cg-rce-web-app
+    category: Remote code execution in web app → confidential file / RDS exposure
+    cwe: [CWE-94, CWE-284]
+    owasp: A03:2021-Injection
+    scenario: rce_web_app
+    vulnerable_source: [cloudgoat/scenarios/aws/rce_web_app/terraform/]
+    notes: >
+      IAM user Lara explores a Load Balancer + S3 for clues, achieves RCE on a vulnerable
+      web app, exposes confidential files, and reaches a secured RDS instance.
+
+  - id: cg-rds-snapshot
+    category: Credential theft via EC2 → S3 → RDS snapshot exposure
+    cwe: [CWE-522, CWE-284]
+    owasp: A05:2021-Security Misconfiguration
+    scenario: rds_snapshot
+    vulnerable_source: [cloudgoat/scenarios/aws/rds_snapshot/terraform/]
+    notes: >
+      EC2 instance privileges are leveraged to steal credentials from S3 and abuse RDS
+      snapshot restore/sharing to access the database.
+
+  - id: cg-s3-version-rollback-via-cfn
+    category: S3 versioning/object-lock bypass → privilege escalation via CloudFormation
+    cwe: [CWE-284, CWE-269]
+    owasp: A05:2021-Security Misconfiguration
+    scenario: s3_version_rollback_via_cfn
+    vulnerable_source: [cloudgoat/scenarios/aws/s3_version_rollback_via_cfn/terraform/]
+    notes: >
+      Web Manager user abuses weak S3 versioning/object-lock config (and a CloudFormation
+      path) to roll back object versions and capture the FLAG.
+
+  - id: cg-secrets-in-the-cloud
+    category: Sensitive data / secret exposure across AWS resources
+    cwe: [CWE-522, CWE-798]
+    owasp: A05:2021-Security Misconfiguration
+    scenario: secrets_in_the_cloud
+    vulnerable_source: [cloudgoat/scenarios/aws/secrets_in_the_cloud/terraform/]
+    notes: >
+      Limited IAM user examines AWS resources for leaked clues, obtains a role granting
+      access to the final Secrets Manager secret.
+
+  - id: cg-sns-secrets
+    category: SNS topic over-permissive subscribe → API key leak → API Gateway abuse
+    cwe: [CWE-284, CWE-522]
+    owasp: A01:2021-Broken Access Control
+    scenario: sns_secrets
+    vulnerable_source: [cloudgoat/scenarios/aws/sns_secrets/terraform/]
+    notes: >
+      Over-permissive SNS policy lets the attacker subscribe to a topic, receive a leaked
+      API key in a debug message, then call API Gateway with it to retrieve the flag.
+
+  - id: cg-sqs-flag-shop
+    category: Business-logic / IAM privilege escalation via SQS-backed web app
+    cwe: [CWE-269, CWE-840]
+    owasp: A04:2021-Insecure Design
+    scenario: sqs_flag_shop
+    vulnerable_source: [cloudgoat/scenarios/aws/sqs_flag_shop/terraform/]
+    notes: >
+      Attacker enumerates current privileges, finds hidden web source, and abuses an
+      SQS-driven purchase flow to "buy" the FLAG through privilege escalation.
+
+  - id: cg-vpc-peering-overexposed
+    category: Network segmentation failure via misconfigured VPC peering + SG → RDS PII
+    cwe: [CWE-284, CWE-668, CWE-918]
+    owasp: A05:2021-Security Misconfiguration
+    scenario: vpc_peering_overexposed
+    vulnerable_source: [cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/]
+    notes: >
+      Low-privileged user exploits EC2 IMDS, then abuses misconfigured VPC peering and
+      security groups to cross from Dev into Prod and read PII from an RDS MySQL database.
+
+  - id: cg-vulnerable-cognito
+    category: Amazon Cognito misconfiguration / broken authentication
+    cwe: [CWE-284, CWE-287]
+    owasp: A07:2021-Identification and Authentication Failures
+    scenario: vulnerable_cognito
+    vulnerable_source: [cloudgoat/scenarios/aws/vulnerable_cognito/terraform/]
+    notes: >
+      Signup/login backed by AWS Cognito; attacker bypasses restrictions and exploits
+      Cognito misconfigurations (self-signup, attribute mutation, weak IdP settings).
+
+  - id: cg-vulnerable-lambda
+    category: IAM privilege escalation via injectable Lambda policy function
+    cwe: [CWE-269, CWE-94]
+    owasp: A01:2021-Broken Access Control
+    scenario: vulnerable_lambda
+    vulnerable_source: [cloudgoat/scenarios/aws/vulnerable_lambda/terraform/]
+    notes: >
+      User bilbo assumes a role, finds a Lambda that applies IAM policies to users, and
+      exploits an input-handling flaw in the function to escalate privileges.
+
+  - id: cg-datafactory-secret-theft
+    category: Azure Data Factory → Key Vault secret exfiltration (excessive access)
+    cwe: [CWE-522, CWE-284]
+    owasp: A01:2021-Broken Access Control
+    scenario: datafactory_secret_theft
+    vulnerable_source: [cloudgoat/scenarios/azure/datafactory_secret_theft/terraform/]
+    notes: >
+      Azure scenario. Provided user accesses an Azure Data Factory and abuses its linked
+      service to exfiltrate secrets from the associated Key Vault.
